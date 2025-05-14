@@ -23,14 +23,14 @@ export async function authMiddleware(request: Request) {
       return null
     }
 
-    // Verify token and get user ID
-    const userId = verifyToken(authToken)
-    if (!userId) {
-      return null
-    }
+  // Verify token and get user ID and role
+  const tokenData = verifyToken(authToken)
+  if (!tokenData || !tokenData.userId) {
+    return null
+  }
 
     // Find user by ID
-    const user = await User.findById(userId)
+    const user = await User.findById(tokenData.userId)
     if (!user) {
       return null
     }

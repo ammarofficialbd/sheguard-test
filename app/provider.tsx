@@ -1,3 +1,4 @@
+import { AuthProvider } from '@/contexts/auth-context';
 import React, { ReactNode } from 'react';
 import { Toaster } from 'react-hot-toast';
 
@@ -8,7 +9,8 @@ interface ProviderProps {
 const Provider: React.FC<ProviderProps> = ({ children }) => {
   return (
     <>
-      {children}
+    <AuthProvider> 
+    {children}
       <Toaster
         position="top-right"
         reverseOrder={false}
@@ -20,6 +22,7 @@ const Provider: React.FC<ProviderProps> = ({ children }) => {
           },
         }}
       />
+    </AuthProvider>
     </>
   );
 };

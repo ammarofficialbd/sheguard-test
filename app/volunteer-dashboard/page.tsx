@@ -14,6 +14,7 @@ import HelpRequests from "./components/help-requests"
 import HelpHistory from "./components/help-history"
 import LocationMap from "./components/location-map"
 import toast from "react-hot-toast"
+import ProtectedRoute from "@/components/protected-route"
 
 export default function VolunteerDashboard() {
   const router = useRouter()
@@ -155,12 +156,13 @@ export default function VolunteerDashboard() {
       <div className="flex flex-col items-center justify-center min-h-screen p-4">
         <h1 className="text-2xl font-bold mb-4">Error Loading Profile</h1>
         <p className="mb-6">Unable to load your volunteer profile. Please try again later.</p>
-        <Button onClick={() => router.push("/")}>Return to Login</Button>
+        <Button onClick={() => router.push("/login")}>Return to Login</Button>
       </div>
     )
   }
 
   return (
+    <ProtectedRoute allowedRoles={["volunteer"]}>
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm">
@@ -219,5 +221,6 @@ export default function VolunteerDashboard() {
         </Tabs>
       </div>
     </div>
+    </ProtectedRoute>
   )
 }

@@ -8,11 +8,14 @@ export async function POST(request: Request) {
     // Connect to database
     await connectToDatabase()
 
-    // Get contact info and OTP from request body
-    const { contactInfo, otp, password } = await request.json()
+    // Get credentials from request body
+    const { contactInfo, password } = await request.json()
 
-    if (!contactInfo || !otp) {
-      return NextResponse.json({ success: false, message: "Contact information and OTP are required" }, { status: 400 })
+    if (!contactInfo || !password) {
+      return NextResponse.json(
+        { success: false, message: "Contact information and password are required" },
+        { status: 400 },
+      )
     }
 
     // Check if it's an email or phone number
@@ -26,29 +29,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, message: "User not found" }, { status: 404 })
     }
 
-    // Check if OTP is valid and not expired
-    if (user.otp !== otp) {
-      return NextResponse.json({ success: false, message: "Invalid OTP" }, { status: 400 })
+    // Check if user is verified
+    if (!user.isVerified) {
+      return NextResponse.json(
+        { success: false, message: "Account not verified. Please verify your account first" },
+        { status: 401 },
+      )
     }
 
-    if (user.otpExpiresAt < new Date()) {
-      return NextResponse.json({ success: false, message: "OTP has expired" }, { status: 400 })
+    // Check if password exists and is correct
+    if (!user.password) {
+      return NextResponse.json(
+        { success: false, message: "Password not set. Please reset your password" },
+        { status: 401 },
+      )
     }
 
-    // Mark user as verified
-    user.isVerified = true
-    user.otp = undefined
-    user.otpExpiresAt = undefined
+    const isPasswordValid = await user.comparePassword(password)
 
-    // Set password if provided (during registration)
-    if (password && !user.password) {
-      user.password = password
+    if (!isPasswordValid) {
+      return NextResponse.json({ success: false, message: "Invalid password" }, { status: 401 })
     }
-
-    await user.save()
-
-    // Check if user has completed registration (has a role)
-    const isRegistrationComplete = !!user.role
 
     // Generate JWT token with user ID and role
     const token = generateToken(user._id.toString(), user.role || "")
@@ -56,16 +57,15 @@ export async function POST(request: Request) {
     // Set cookie with token
     const response = NextResponse.json({
       success: true,
-      message: "OTP verified successfully",
+      message: "Login successful",
       user: {
         _id: user._id,
+        name: user.name,
         email: user.email,
         phone: user.phone,
-        name: user.name,
         role: user.role,
         profilePhotoUrl: user.profilePhotoUrl,
         isVerified: user.isVerified,
-        isRegistrationComplete,
       },
     })
 
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
 
     return response
   } catch (error) {
-    console.error("Error verifying OTP:", error)
-    return NextResponse.json({ success: false, message: "Failed to verify OTP" }, { status: 500 })
+    console.error("Error logging in:", error)
+    return NextResponse.json({ success: false, message: "Failed to log in" }, { status: 500 })
   }
 }

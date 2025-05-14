@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { connectToDatabase } from "@/lib/db"
 import User from "@/models/User"
-import { verifyToken } from "@/lib/auth"
+import { generateToken, verifyToken } from "@/lib/auth"
 import { uploadImage } from "@/lib/upload"
 
 export async function POST(request: Request) {
@@ -22,13 +22,13 @@ export async function POST(request: Request) {
     }
 
     // Verify token and get user ID
-    const userId = verifyToken(authToken)
-    if (!userId) {
+    const tokenData = verifyToken(authToken)
+    if (!tokenData || !tokenData.userId) {
       return NextResponse.json({ success: false, message: "Invalid authentication token" }, { status: 401 })
     }
 
     // Find user by ID
-    const user = await User.findById(userId)
+    const user = await User.findById(tokenData.userId)
     if (!user) {
       return NextResponse.json({ success: false, message: "User not found" }, { status: 404 })
     }
@@ -69,6 +69,7 @@ export async function POST(request: Request) {
     if (email) user.email = email
     if (phone) user.phone = phone
     if (profilePhotoUrl) user.profilePhotoUrl = profilePhotoUrl
+    
     user.location = {
       type: "Point",
       coordinates: [lng, lat], // [longitude, latitude]
@@ -107,17 +108,36 @@ export async function POST(request: Request) {
     // Save updated user
     await user.save()
 
-    return NextResponse.json({
-      success: true,
-      message: "User registered successfully",
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-      },
-    })
+   // Generate new JWT token with the role
+ 
+   const token = generateToken(user._id.toString(), role)
+
+   // Set cookie with token
+   const response = NextResponse.json({
+     success: true,
+     message: "User registered successfully",
+     user: {
+       _id: user._id,
+       name: user.name,
+       email: user.email,
+       phone: user.phone,
+       role: user.role,
+     },
+   })
+
+   // Set HTTP-only cookie with the token
+   response.cookies.set({
+     name: "auth_token",
+     value: token,
+     httpOnly: true,
+     secure: process.env.NODE_ENV === "production",
+     sameSite: "strict",
+     path: "/",
+     maxAge: 7 * 24 * 60 * 60, // 7 days
+   })
+   
+   return response;
+
   } catch (error) {
     console.error("Error registering user:", error)
     return NextResponse.json({ success: false, message: "Failed to register user" }, { status: 500 })

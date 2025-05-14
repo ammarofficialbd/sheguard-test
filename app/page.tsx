@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useEffect } from "react"
-import { Shield, ArrowLeft, Check, Upload, User, Mail, Phone, MapPin } from "lucide-react"
+import { Shield, ArrowLeft, Check, Upload, User, Mail, Phone, MapPin, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,13 +12,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import OtpInput from "@/components/otp-input"
 import Image from "next/image"
 import toast from 'react-hot-toast';
+import { useAuth } from "@/contexts/auth-context"
+import { useRouter } from "next/navigation"
 
 
 
 // Authentication steps
 type AuthStep =
   | "contact-input"
+  | "login"
   | "otp-verification"
+  | "set-password"
   | "role-selection"
   | "get-location"
   | "victim-signup"
@@ -42,15 +46,19 @@ const VOLUNTEER_SKILLS = [
 ]
 
 export default function Home() {
+  const router = useRouter()
+  const { login, register, isLoading, status, user } = useAuth()
   // State management
   const [currentStep, setCurrentStep] = useState<AuthStep>("contact-input")
   const [contactInfo, setContactInfo] = useState("")
   const [otp, setOtp] = useState("")
+  const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [otpTimer, setOtpTimer] = useState(60)
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null)
   const [userExists, setUserExists] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
+  const [isRegistration, setIsRegistration] = useState(false)
 
   // User form data
   const [userData, setUserData] = useState({
@@ -92,6 +100,45 @@ export default function Home() {
     }
   }, [isTimerRunning, otpTimer])
 
+  // Check contact info to determine if user exists
+  const handleCheckUser = async () => {
+    // Validate contact info
+    if (!contactInfo) {
+     toast('Please enter your phone and email')
+      return
+    }
+
+    try {
+      // Call API to check if user exists
+      const response = await fetch("/api/auth/check-user", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ contactInfo }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to check user")
+      }
+
+      setUserExists(data.exists)
+
+      // If user exists, go to login
+      if (data.exists) {
+        setCurrentStep("login")
+      } else {
+        // If new user, send OTP for registration
+        setIsRegistration(true)
+        handleSendOTP()
+      }
+    } catch (error) {
+      console.error("Error checking user:", error)
+      toast(error instanceof Error ? error.message : "Failed to check user",)
+    }
+  }
   // Handle sending OTP
   const handleSendOTP = async () => {
     // Validate contact info
@@ -106,7 +153,7 @@ export default function Home() {
     }
 
     try {
-      setIsLoading(true)
+      
 
       // Call API to send OTP
       const response = await fetch("/api/auth/send-otp", {
@@ -151,65 +198,86 @@ export default function Home() {
         description: error instanceof Error ? error.message : "Failed to send OTP",
         variant: "destructive",
       }) */
-    } finally {
-      setIsLoading(false)
     }
   }
+  
+ // Handle login
+ const handleLogin = async () => {
+  if (!contactInfo || !password) {
+    toast("Please enter your contact information and password",)
+    return
+  }
 
+  await login(contactInfo, password)
+}
   // Handle OTP verification
   const handleVerifyOtp = async () => {
     // Validate OTP
     if (otp.length !== 6) {
-      /* toast({
-        title: "Error",
-        description: "Please enter a valid 6-digit OTP",
-        variant: "destructive",
-      }) */
       toast("Please enter a valid 6-digit OTP")
       return
     }
 
     try {
-      setIsLoading(true)
+      // For registration flow, move to set password
+      if (isRegistration) {
+        setCurrentStep("set-password")
+        return
+      }
 
       // Call API to verify OTP
+      const success = await register(contactInfo, otp)
+
+      if (success) {
+        // If user has completed registration, the auth context will handle redirection
+        // Otherwise, move to role selection
+        setCurrentStep("role-selection")
+      }
+    } catch (error) {
+      console.error("Error verifying OTP:", error)
+      toast(error instanceof Error ? error.message : "Failed to verify OTP")
+    }
+  }
+
+  // Handle setting password
+  const handleSetPassword = async () => {
+    // Validate password
+    if (!password) {
+      toast("Please enter a password")
+      return
+    }
+
+    if (password !== confirmPassword) {
+      toast("Passwords do not match")
+      return
+    }
+
+    if (password.length < 6) {
+      toast("Password must be at least 6 characters long")
+      return
+    }
+
+    try {
+      // Call API to verify OTP and set password
       const response = await fetch("/api/auth/verify-otp", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ contactInfo, otp }),
+        body: JSON.stringify({ contactInfo, otp, password }),
       })
 
       const data = await response.json()
-      console.log("OTP verification response:", data)
+
       if (!response.ok) {
-       /*  throw new Error(data.message || "Failed to verify OTP") */
-        toast(data.message || "Failed to verify OTP")
+        throw new Error(data.message || "Failed to set password")
       }
 
-      // If user has completed registration, go to success
-      if (data.user.isRegistrationComplete) {
-        /* toast({
-          title: "Login Successful",
-          description: "Welcome back to SheGuard!",
-        }) */
-        toast("Welcome back to SheGuard!")
-        setCurrentStep("success")
-      } else {
-        // If new user, go to role selection
-        setCurrentStep("role-selection")
-      }
+      // Move to role selection
+      setCurrentStep("role-selection")
     } catch (error) {
-      console.error("Error verifying OTP:", error)
-      /* toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to verify OTP",
-        variant: "destructive",
-      }) */
-      toast(error instanceof Error ? error.message : "Failed to verify OTP")
-    } finally {
-      setIsLoading(false)
+      console.error("Error setting password:", error)
+      toast(error instanceof Error ? error.message : "Failed to set password")
     }
   }
 
@@ -266,8 +334,6 @@ export default function Home() {
     }
 
     try {
-      setIsLoading(true)
-
       // Create form data for file upload
       const formData = new FormData()
       formData.append("role", "victim")
@@ -303,7 +369,7 @@ export default function Home() {
       }) */
       toast("Your victim account has been created successfully")
 
-      setCurrentStep("success")
+      router.push("/victim-dashboard")
     } catch (error) {
       console.error("Error registering victim:", error)
       /* toast({
@@ -312,8 +378,6 @@ export default function Home() {
         variant: "destructive",
       }) */
       toast(error instanceof Error ? error.message : "Failed to register user")
-    } finally {
-      setIsLoading(false)
     }
   }
 
@@ -326,8 +390,7 @@ export default function Home() {
     }
 
     try {
-      setIsLoading(true)
-
+    
       // Create form data for file upload
       const formData = new FormData()
       formData.append("role", "volunteer")
@@ -378,7 +441,7 @@ export default function Home() {
       }) */
       toast("Your volunteer account has been created and is pending admin verification")
 
-      setCurrentStep("success")
+      router.push("/volunteer-dashboard")
     } catch (error) {
       console.error("Error registering volunteer:", error)
       /* toast({
@@ -387,8 +450,6 @@ export default function Home() {
         variant: "destructive",
       }) */
       toast(error instanceof Error ? error.message : "Failed to register user")
-    } finally {
-      setIsLoading(false)
     }
   }
 
@@ -472,6 +533,19 @@ export default function Home() {
       setLoading(false)
   }
 }
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (status === "authenticated" && user) {
+      if (user.role === "victim") {
+        router.push("/victim-dashboard")
+      } else if (user.role === "volunteer") {
+        router.push("/volunteer-dashboard")
+      } else if (user.role === "admin") {
+        router.push("/admin-dashboard")
+      }
+    }
+  }, [status, user])
   // Render different steps based on currentStep
   const renderStep = () => {
     switch (currentStep) {
@@ -508,10 +582,10 @@ export default function Home() {
               <CardFooter>
                 <Button
                   className="w-full bg-purple-700 hover:bg-purple-800 text-white py-6"
-                  onClick={handleSendOTP}
+                  onClick={handleCheckUser}
                   disabled={!contactInfo || isLoading}
                 >
-                  {isLoading ? "Sending..." : "Send OTP"}
+                  {isLoading ? "Processing..." : "Continue"}
                 </Button>
               </CardFooter>
               <div className="px-6 pb-6 text-center">
@@ -519,6 +593,65 @@ export default function Home() {
                   By continuing, you agree to our Terms of Service and Privacy Policy
                 </p>
               </div>
+            </Card>
+          </div>
+        )
+
+      case "login":
+        return (
+          <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gradient-to-b from-pink-50 to-purple-50">
+            <Card className="w-full max-w-md mx-auto">
+              <CardHeader>
+                <div className="flex items-center mb-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 mr-2"
+                    onClick={() => setCurrentStep("contact-input")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                  <CardTitle className="text-xl text-purple-900">Login to SheGuard</CardTitle>
+                </div>
+                <CardDescription>Enter your password to continue</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="password">Password</Label>
+                    <div className="flex">
+                      <Lock className="h-4 w-4 text-gray-400 absolute mt-3 ml-3" />
+                      <Input
+                        id="password"
+                        type="password"
+                        placeholder="Enter your password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="pl-10 py-6"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    variant="link"
+                    className="p-0 text-purple-700"
+                    onClick={() => {
+                      setIsRegistration(false)
+                      handleSendOTP()
+                    }}
+                  >
+                    Forgot password?
+                  </Button>
+                </div>
+              </CardContent>
+              <CardFooter>
+                <Button
+                  className="w-full bg-purple-700 hover:bg-purple-800 text-white py-6"
+                  onClick={handleLogin}
+                  disabled={!password || isLoading}
+                >
+                  {isLoading ? "Logging in..." : "Login"}
+                </Button>
+              </CardFooter>
             </Card>
           </div>
         )
@@ -533,7 +666,7 @@ export default function Home() {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 mr-2"
-                    onClick={() => setCurrentStep("contact-input")}
+                    onClick={() => (isRegistration ? setCurrentStep("contact-input") : setCurrentStep("login"))}
                   >
                     <ArrowLeft className="h-4 w-4" />
                   </Button>
@@ -572,70 +705,134 @@ export default function Home() {
           </div>
         )
 
-      case "role-selection":
-        return (
-          <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gradient-to-b from-pink-50 to-purple-50">
-            <Card className="w-full max-w-md mx-auto">
-              <CardHeader>
-                <div className="flex items-center mb-2">
+      case "set-password":
+          return (
+            <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gradient-to-b from-pink-50 to-purple-50">
+              <Card className="w-full max-w-md mx-auto">
+                <CardHeader>
+                  <div className="flex items-center mb-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 mr-2"
+                      onClick={() => setCurrentStep("otp-verification")}
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <CardTitle className="text-xl text-purple-900">Create Password</CardTitle>
+                  </div>
+                  <CardDescription>Create a password for your account</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="new-password">Password</Label>
+                      <div className="flex">
+                        <Lock className="h-4 w-4 text-gray-400 absolute mt-3 ml-3" />
+                        <Input
+                          id="new-password"
+                          type="password"
+                          placeholder="Create a password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          className="pl-10 py-6"
+                        />
+                      </div>
+                    </div>
+  
+                    <div className="space-y-2">
+                      <Label htmlFor="confirm-password">Confirm Password</Label>
+                      <div className="flex">
+                        <Lock className="h-4 w-4 text-gray-400 absolute mt-3 ml-3" />
+                        <Input
+                          id="confirm-password"
+                          type="password"
+                          placeholder="Confirm your password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          className="pl-10 py-6"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+                <CardFooter>
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 mr-2"
-                    onClick={() => setCurrentStep("otp-verification")}
+                    className="w-full bg-purple-700 hover:bg-purple-800 text-white py-6"
+                    onClick={handleSetPassword}
+                    disabled={!password || !confirmPassword || isLoading}
                   >
-                    <ArrowLeft className="h-4 w-4" />
+                    {isLoading ? "Processing..." : "Continue"}
                   </Button>
-                  <CardTitle className="text-xl text-purple-900">Select your role</CardTitle>
-                </div>
-                <CardDescription>Choose how you want to use SheGuard</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <RadioGroup
-                  value={selectedRole || ""}
-                  onValueChange={(value) => setSelectedRole(value as UserRole)}
-                  className="space-y-3"
-                >
-                  <div
-                    className={`flex items-center space-x-3 border rounded-lg p-4 ${selectedRole === "victim" ? "border-purple-500 bg-purple-50" : "border-gray-200"}`}
+                </CardFooter>
+              </Card>
+            </div>
+        )
+  
+      case "role-selection":
+          return (
+            <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gradient-to-b from-pink-50 to-purple-50">
+              <Card className="w-full max-w-md mx-auto">
+                <CardHeader>
+                  <div className="flex items-center mb-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 mr-2"
+                      onClick={() => setCurrentStep(isRegistration ? "set-password" : "otp-verification")}
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <CardTitle className="text-xl text-purple-900">Select your role</CardTitle>
+                  </div>
+                  <CardDescription>Choose how you want to use SheGuard</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <RadioGroup
+                    value={selectedRole || ""}
+                    onValueChange={(value) => setSelectedRole(value as UserRole)}
+                    className="space-y-3"
                   >
-                    <RadioGroupItem value="victim" id="victim" />
-                    <Label htmlFor="victim" className="flex-1 cursor-pointer">
-                      <div className="font-medium">Victim</div>
-                      <div className="text-sm text-gray-500">I need protection and safety features</div>
-                    </Label>
-                  </div>
-
-                  <div
-                    className={`flex items-center space-x-3 border rounded-lg p-4 ${selectedRole === "volunteer" ? "border-purple-500 bg-purple-50" : "border-gray-200"}`}
+                    <div
+                      className={`flex items-center space-x-3 border rounded-lg p-4 ${selectedRole === "victim" ? "border-purple-500 bg-purple-50" : "border-gray-200"}`}
+                    >
+                      <RadioGroupItem value="victim" id="victim" />
+                      <Label htmlFor="victim" className="flex-1 cursor-pointer">
+                        <div className="font-medium">Victim</div>
+                        <div className="text-sm text-gray-500">I need protection and safety features</div>
+                      </Label>
+                    </div>
+  
+                    <div
+                      className={`flex items-center space-x-3 border rounded-lg p-4 ${selectedRole === "volunteer" ? "border-purple-500 bg-purple-50" : "border-gray-200"}`}
+                    >
+                      <RadioGroupItem value="volunteer" id="volunteer" />
+                      <Label htmlFor="volunteer" className="flex-1 cursor-pointer">
+                        <div className="font-medium">Volunteer</div>
+                        <div className="text-sm text-gray-500">I want to help others in need</div>
+                      </Label>
+                    </div>
+  
+                    <div className="flex items-center space-x-3 border rounded-lg p-4 border-gray-200 opacity-50">
+                      <RadioGroupItem value="admin" id="admin" disabled />
+                      <Label htmlFor="admin" className="flex-1 cursor-not-allowed">
+                        <div className="font-medium">Admin</div>
+                        <div className="text-sm text-gray-500">Restricted access</div>
+                      </Label>
+                    </div>
+                  </RadioGroup>
+                </CardContent>
+                <CardFooter>
+                  <Button
+                    className="w-full bg-purple-700 hover:bg-purple-800 text-white py-6"
+                    onClick={handleRoleSelection}
+                    disabled={!selectedRole}
                   >
-                    <RadioGroupItem value="volunteer" id="volunteer" />
-                    <Label htmlFor="volunteer" className="flex-1 cursor-pointer">
-                      <div className="font-medium">Volunteer</div>
-                      <div className="text-sm text-gray-500">I want to help others in need</div>
-                    </Label>
-                  </div>
-
-                  <div className="flex items-center space-x-3 border rounded-lg p-4 border-gray-200 opacity-50">
-                    <RadioGroupItem value="admin" id="admin" disabled />
-                    <Label htmlFor="admin" className="flex-1 cursor-not-allowed">
-                      <div className="font-medium">Admin</div>
-                      <div className="text-sm text-gray-500">Restricted access</div>
-                    </Label>
-                  </div>
-                </RadioGroup>
-              </CardContent>
-              <CardFooter>
-                <Button
-                  className="w-full bg-purple-700 hover:bg-purple-800 text-white py-6"
-                  onClick={handleRoleSelection}
-                  disabled={!selectedRole}
-                >
-                  Continue
-                </Button>
-              </CardFooter>
-            </Card>
-          </div>
+                    Continue
+                  </Button>
+                </CardFooter>
+              </Card>
+            </div>
         )
 
       case "get-location": 
@@ -1048,59 +1245,11 @@ export default function Home() {
             </Card>
           </div>
         )
-
-      case "success":
-        return (
-          <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gradient-to-b from-pink-50 to-purple-50">
-            <Card className="w-full max-w-md mx-auto text-center">
-              <CardContent className="pt-6">
-                <div className="flex justify-center mb-6">
-                  <div className="h-20 w-20 bg-green-100 rounded-full flex items-center justify-center">
-                    <Check className="h-10 w-10 text-green-600" />
-                  </div>
-                </div>
-
-                <h2 className="text-2xl font-bold text-purple-900 mb-2">
-                  {userExists ? "Welcome Back!" : "Account Created Successfully!"}
-                </h2>
-
-                <p className="text-gray-600 mb-6">
-                  {userExists
-                    ? "You have successfully logged in to your SheGuard account."
-                    : selectedRole === "victim"
-                      ? "Your safety is our priority. You can now use SheGuard to stay protected."
-                      : "Thank you for volunteering. Your application is under review."}
-                </p>
-              </CardContent>
-              <CardFooter>
-                <Button
-                  className="w-full bg-purple-700 hover:bg-purple-800 text-white py-6"
-                  onClick={() => {
-                    // In a real app, this would redirect to the appropriate dashboard
-                    window.location.href = selectedRole === "volunteer" ? "/volunteer-dashboard" : "/victim-dashboard"
-                  }}
-                >
-                  {selectedRole} Dashboard
-                </Button>
-              </CardFooter>
-            </Card>
-          </div>
-        )
     }
   }
 
   return (
     <main>
-      <div className="fixed top-0 left-0 right-0 z-10 bg-white shadow-sm">
-        <div className="container mx-auto px-4 py-3 flex justify-between items-center">
-          <div className="flex items-center">
-            <Shield className="h-6 w-6 text-purple-700 mr-2" />
-            <span className="font-bold text-purple-900">SheGuard</span>
-          </div>
-          {/* This would typically be a user menu or login button */}
-          <div className="h-8 w-8 rounded-full bg-gray-200"></div>
-        </div>
-      </div>
       <div className="pt-14">{renderStep()}</div>
     </main>
   )
